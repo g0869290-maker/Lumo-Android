@@ -18,29 +18,46 @@ jobs:
     timeout-minutes: 30
 
     steps:
+      # 1. Get repository files
       - name: Checkout repository
         uses: actions/checkout@v4
 
+      # 2. Install Java
       - name: Set up Java 17
         uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: '17'
 
+      # 3. Set up Android SDK without automatic licence prompts
       - name: Set up Android SDK
         uses: android-actions/setup-android@v3
+        with:
+          accept-android-sdk-licenses: false
+          packages: ''
 
+      # 4. Accept SDK licences automatically
       - name: Accept Android SDK licenses
-        run: yes | sdkmanager --licenses
+        shell: bash
+        run: |
+          set -e
+          yes | sdkmanager --licenses
 
-      - name: Install Android SDK 35
-        run: sdkmanager "platforms;android-35" "build-tools;35.0.0"
+      # 5. Install required Android SDK packages
+      - name: Install Android SDK packages
+        run: |
+          sdkmanager \
+            "platform-tools" \
+            "platforms;android-35" \
+            "build-tools;35.0.0"
 
+      # 6. Install Gradle
       - name: Set up Gradle 8.9
         uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '8.9'
 
+      # 7. Extract the complete project ZIP
       - name: Extract Lumo Android project
         shell: bash
         run: |
@@ -48,32 +65,61 @@ jobs:
 
           ZIP_FILE="Lumo_Android_Full_Project.zip"
 
-          test -f "$ZIP_FILE" || {
-            echo "Project ZIP not found!"
+          if [ ! -f "$ZIP_FILE" ]; then
+            echo "ERROR: Lumo project ZIP not found!"
             exit 1
-          }
+          fi
 
           mkdir -p "$RUNNER_TEMP/lumo-unpacked"
-          unzip -q "$ZIP_FILE" -d "$RUNNER_TEMP/lumo-unpacked"
+
+          unzip -q "$ZIP_FILE" \
+            -d "$RUNNER_TEMP/lumo-unpacked"
+
+          echo "Searching for Android project..."
 
           PROJECT_DIR="$(find "$RUNNER_TEMP/lumo-unpacked" \
             -type f -name settings.gradle.kts \
             -printf '%h\n' -quit)"
 
           if [ -z "$PROJECT_DIR" ]; then
-            echo "Gradle project not found!"
+            echo "ERROR: settings.gradle.kts not found!"
             exit 1
           fi
 
-          test -f "$PROJECT_DIR/app/build.gradle.kts"
+          if [ ! -f "$PROJECT_DIR/app/build.gradle.kts" ]; then
+            echo "ERROR: app/build.gradle.kts not found!"
+            exit 1
+          fi
 
           echo "LUMO_PROJECT_DIR=$PROJECT_DIR" >> "$GITHUB_ENV"
 
+          echo "Android project found:"
+          echo "$PROJECT_DIR"
+
+      # 8. Build Android debug APK
       - name: Build Lumo APK
         working-directory: ${{ env.LUMO_PROJECT_DIR }}
-        run: gradle --no-daemon --stacktrace assembleDebug
+        run: |
+          gradle \
+            --no-daemon \
+            --stacktrace \
+            assembleDebug
 
-      - name: Upload APK
+      # 9. Verify APK exists
+      - name: Verify APK
+        shell: bash
+        run: |
+          APK="${LUMO_PROJECT_DIR}/app/build/outputs/apk/debug/app-debug.apk"
+
+          if [ ! -f "$APK" ]; then
+            echo "ERROR: APK was not generated!"
+            exit 1
+          fi
+
+          ls -lh "$APK"
+
+      # 10. Upload APK to GitHub Actions
+      - name: Upload Lumo APK
         uses: actions/upload-artifact@v4
         with:
           name: Lumo-debug-APK
