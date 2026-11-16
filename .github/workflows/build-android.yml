@@ -30,6 +30,9 @@ jobs:
       - name: Set up Android SDK
         uses: android-actions/setup-android@v3
 
+      - name: Accept Android SDK licenses
+        run: yes | sdkmanager --licenses
+
       - name: Install Android SDK 35
         run: sdkmanager "platforms;android-35" "build-tools;35.0.0"
 
@@ -45,10 +48,10 @@ jobs:
 
           ZIP_FILE="Lumo_Android_Full_Project.zip"
 
-          if [ ! -f "$ZIP_FILE" ]; then
-            echo "Lumo project ZIP not found in repository root!"
+          test -f "$ZIP_FILE" || {
+            echo "Project ZIP not found!"
             exit 1
-          fi
+          }
 
           mkdir -p "$RUNNER_TEMP/lumo-unpacked"
           unzip -q "$ZIP_FILE" -d "$RUNNER_TEMP/lumo-unpacked"
@@ -58,18 +61,13 @@ jobs:
             -printf '%h\n' -quit)"
 
           if [ -z "$PROJECT_DIR" ]; then
-            echo "Android Gradle project not found inside ZIP!"
+            echo "Gradle project not found!"
             exit 1
           fi
 
-          if [ ! -f "$PROJECT_DIR/app/build.gradle.kts" ]; then
-            echo "App Gradle file missing!"
-            exit 1
-          fi
+          test -f "$PROJECT_DIR/app/build.gradle.kts"
 
           echo "LUMO_PROJECT_DIR=$PROJECT_DIR" >> "$GITHUB_ENV"
-
-          echo "Found project: $PROJECT_DIR"
 
       - name: Build Lumo APK
         working-directory: ${{ env.LUMO_PROJECT_DIR }}
