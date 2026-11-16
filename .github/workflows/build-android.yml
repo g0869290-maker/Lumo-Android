@@ -1,4 +1,3 @@
-
 name: Build Lumo Android
 
 on:
@@ -15,6 +14,7 @@ jobs:
   build:
     name: Build Lumo APK
     runs-on: ubuntu-latest
+    timeout-minutes: 40
 
     steps:
       - name: Checkout repository
@@ -46,50 +46,38 @@ jobs:
             echo "ERROR: Lumo_Android_Native_Project.zip not found in repository root."
             exit 1
           fi
-
+          rm -rf extracted
           mkdir -p extracted
           unzip -q Lumo_Android_Native_Project.zip -d extracted
 
       - name: Locate Android project
         run: |
-          SETTINGS=$(find extracted -type f \( \
-            -name "settings.gradle" -o \
-            -name "settings.gradle.kts" \
-          \) | head -n 1)
-
+          SETTINGS=$(find extracted -type f \( -name "settings.gradle" -o -name "settings.gradle.kts" \) | head -n 1)
           if [ -z "$SETTINGS" ]; then
             echo "ERROR: settings.gradle or settings.gradle.kts not found."
             find extracted -maxdepth 5 -type f
             exit 1
           fi
-
           PROJECT_DIR=$(dirname "$SETTINGS")
-
-          if [ ! -f "$PROJECT_DIR/app/build.gradle" ] && \
-             [ ! -f "$PROJECT_DIR/app/build.gradle.kts" ]; then
+          if [ ! -f "$PROJECT_DIR/app/build.gradle" ] && [ ! -f "$PROJECT_DIR/app/build.gradle.kts" ]; then
             echo "ERROR: Android app module not found."
             find "$PROJECT_DIR" -maxdepth 4 -type f
             exit 1
           fi
-
           echo "ANDROID_PROJECT_DIR=$PROJECT_DIR" >> "$GITHUB_ENV"
-          echo "Android project: $PROJECT_DIR"
 
       - name: Build Lumo APK
         run: |
           cd "$ANDROID_PROJECT_DIR"
-          gradle --no-daemon clean assembleDebug
+          gradle --no-daemon --stacktrace clean assembleDebug
 
       - name: Find APK
         run: |
-          APK=$(find "$ANDROID_PROJECT_DIR" -type f \
-            -path "*/build/outputs/apk/*/*.apk" | head -n 1)
-
+          APK=$(find "$ANDROID_PROJECT_DIR" -type f -path "*/build/outputs/apk/*/*.apk" | head -n 1)
           if [ -z "$APK" ]; then
             echo "ERROR: APK was not generated."
             exit 1
           fi
-
           mkdir -p "$GITHUB_WORKSPACE/output"
           cp "$APK" "$GITHUB_WORKSPACE/output/Lumo-Android-debug.apk"
 
