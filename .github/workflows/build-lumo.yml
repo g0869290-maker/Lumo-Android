@@ -1,0 +1,85 @@
+name: Build Lumo Android
+
+on:
+  push:
+    branches: [ main, master ]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: build-lumo-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Build Lumo Android
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Install Android SDK packages
+        run: |
+          SDK="${ANDROID_HOME:-/usr/local/lib/android/sdk}"
+          SDKMANAGER="$SDK/cmdline-tools/latest/bin/sdkmanager"
+          if [ ! -x "$SDKMANAGER" ]; then
+            SDKMANAGER=$(ls -d "$SDK"/cmdline-tools/*/bin/sdkmanager | head -1)
+          fi
+          yes | "$SDKMANAGER" --licenses > /dev/null || true
+          "$SDKMANAGER" "platforms;android-35" "build-tools;35.0.0" "platform-tools"
+
+      - name: Locate Gradle project
+        # Finds the project wherever it is in the repo. If it is only inside a zip,
+        # the zip is extracted here, so the repo does not need to be unzipped by hand.
+        run: |
+          find_root() {
+            find "$1" -name settings.gradle.kts -not -path '*/.git/*' -not -path '*/build/*' \
+              | head -1 | xargs -r dirname
+          }
+          ROOT=$(find_root .)
+          if [ -z "$ROOT" ]; then
+            mkdir -p _extracted
+            find . -name '*.zip' -not -path './.git/*' -print0 | while IFS= read -r -d '' z; do
+              echo "Extracting $z"
+              unzip -q -o "$z" -d _extracted
+            done
+            ROOT=$(find_root _extracted)
+          fi
+          if [ -z "$ROOT" ]; then
+            echo "No settings.gradle.kts found in the repository or in any zip."
+            exit 1
+          fi
+          ROOT="${ROOT#./}"
+          echo "Gradle project found at: $ROOT"
+          echo "PROJECT_DIR=$ROOT" >> "$GITHUB_ENV"
+
+      - name: Set up Gradle 8.9
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.9'
+
+      - name: Generate Gradle wrapper
+        working-directory: ${{ env.PROJECT_DIR }}
+        run: gradle wrapper --gradle-version 8.9
+
+      - name: Build debug APK
+        working-directory: ${{ env.PROJECT_DIR }}
+        run: ./gradlew --no-daemon :app:assembleDebug
+
+      - name: Upload debug APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: Lumo-Android-debug-APK
+          path: ${{ env.PROJECT_DIR }}/app/build/outputs/apk/debug/*.apk
+          if-no-files-found: error
+          retention-days: 14
